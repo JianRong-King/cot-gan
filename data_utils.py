@@ -14,6 +14,9 @@ import io
 import math
 
 
+import scipy.io as scio
+
+
 class DataProcessor:
     def __init__(self, path, seq_len, channels):
         self.training_path = path
@@ -183,29 +186,211 @@ class EEGData(NPData):
 
     def __init__(self, Dx, length, batch_size, nepoch=np.inf, tensor=True, seed=0, prefix="", downsample=1):
         # nsubject x n trials x channel x times_steps
-        all_data = np.load(prefix + "data/eeg/eeg_data.npy", allow_pickle=True)
-        train_data = []
-        test_data = []
-        sep = 0.75
-        np.random.RandomState(seed).shuffle(all_data)
-        for sub_data in all_data:
-            ntrial = int(sep * len(sub_data))
-            train_data += sub_data[:ntrial, :downsample * length:downsample, :Dx],
-            test_data += sub_data[ntrial:, :downsample * length:downsample, :Dx],
-            assert train_data[-1].shape[1] == length
-            assert train_data[-1].shape[2] == Dx
+        # all_data = np.load(prefix + "data/eeg/eeg_data.npy", allow_pickle=True)
+        # train_data = []
+        # test_data = []
+        # sep = 0.75
+        # np.random.RandomState(seed).shuffle(all_data)
+        # for sub_data in all_data:
+        #     ntrial = int(sep * len(sub_data))
+        #     train_data += sub_data[:ntrial, :downsample * length:downsample, :Dx],
+        #     test_data += sub_data[ntrial:, :downsample * length:downsample, :Dx],
+        #     assert train_data[-1].shape[1] == length
+        #     assert train_data[-1].shape[2] == Dx
 
-        self.train_data = self.normalize(train_data)
-        self.test_data = self.normalize(test_data)
+        # self.train_data = self.normalize(train_data)
+        # self.test_data = self.normalize(test_data)
+        # self.all_data = np.concatenate([self.train_data, self.test_data], 0)
+        # super().__init__(self.train_data, batch_size, nepoch, tensor)
+
+        files = {
+            'MFP': ['Training.mat']
+        }
+
+        filename = "MFP"
+        file = files[filename]
+        filepath = "./data/CVACaseStudy/"
+
+        if filename == "MFP":
+            data = scio.loadmat(filepath + file[0])
+            data_t1 = data["T1"]
+            data_t2 = data["T2"]
+            data_t3 = data["T3"]
+
+        print(data_t1.shape, data_t2.shape, data_t3.shape)
+
+
+
+        # Split the data into training, validation and test sets: 0,6, 0.2, 0.2
+        train_ratio = 0.6
+        valid_ratio = 0.2
+        test_ratio = 1 - train_ratio - valid_ratio 
+
+        # full data
+
+        new_data_train_t1 = data_t1[:int(data_t1.shape[0] * train_ratio)] 
+        new_data_train_t2 = data_t2[:int(data_t2.shape[0] * train_ratio)]
+        new_data_train_t3 = data_t3[:int(data_t3.shape[0] * train_ratio)]
+
+        new_data_valid_t1 = data_t1[int(data_t1.shape[0] * train_ratio) : int(data_t1.shape[0] * (train_ratio+valid_ratio))] 
+        new_data_valid_t2 = data_t2[int(data_t2.shape[0] * train_ratio) : int(data_t2.shape[0] * (train_ratio+valid_ratio))]
+        new_data_valid_t3 = data_t3[int(data_t3.shape[0] * train_ratio) : int(data_t3.shape[0] * (train_ratio+valid_ratio))]
+
+        new_data_test_t1 = data_t1[int(data_t1.shape[0] * (train_ratio+valid_ratio)) : data_t1.shape[0]] 
+        new_data_test_t2 = data_t2[int(data_t2.shape[0] * (train_ratio+valid_ratio)) : data_t2.shape[0]]
+        new_data_test_t3 = data_t3[int(data_t3.shape[0] * (train_ratio+valid_ratio)) : data_t3.shape[0]]
+
+        # Combine the 3 datasets into each of the training, validation and testing sets
+        training_set = np.vstack((new_data_train_t1,new_data_train_t2,new_data_train_t3))
+        validation_set = np.vstack((new_data_valid_t1,new_data_valid_t2,new_data_valid_t3))
+        testing_set = np.vstack((new_data_test_t1,new_data_test_t2,new_data_test_t3))
+
+
+        idx_var_remove = list(set([-1])) # remove output_vars and last variable, ensure that both are different with set()
+        pressure_var = 5 # 4th index
+
+        X_train = np.delete(training_set, idx_var_remove, axis=1)
+        Y_train = training_set[:, pressure_var - 1]
+
+        X_valid = np.delete(validation_set, idx_var_remove, axis=1)
+        Y_valid = validation_set[:, pressure_var -1]
+
+        X_test = np.delete(testing_set, idx_var_remove, axis=1)
+        Y_test = testing_set[:, pressure_var -1]
+
+        print(X_train.shape)
+
+
+        def get_norm_param(X,Y):
+            x = X
+            y = Y
+
+            keys = ['x_min','x_max','y_min','y_max','x_mean','x_std','y_mean','y_std']
+            norm_param = {}
+            for key in keys: norm_param[key] = []
+            
+            norm_param['x_min']  = np.min(x, axis=0)
+            norm_param['x_max']  = np.max(x, axis=0)
+            norm_param['y_min']  = np.min(y, axis=0)
+            norm_param['y_max']  = np.max(y, axis=0)
+            norm_param['x_mean'] = np.mean(x, axis=0)
+            norm_param['x_std']  = np.std(x, axis=0)
+            norm_param['y_mean'] = np.mean(y, axis=0)
+            norm_param['y_std']  = np.std(y, axis=0)
+
+            return norm_param
+
+        norm_param_train = get_norm_param(X_train,Y_train)
+
+        def normalize(X,Y,norm_param,method):
+            x = X
+            y = Y
+
+            if method == 'minmax':
+                X_norm = (x - norm_param['x_min']) / (norm_param['x_max'] - norm_param['x_min'])
+                Y_norm = (y - norm_param['y_min']) / (norm_param['y_max'] - norm_param['y_min'])
+
+
+            elif method == 'standardize':
+                X_norm = (x - norm_param['x_mean']) / norm_param['x_std']
+                Y_norm = (y - norm_param['y_mean']) / norm_param['y_std']
+
+            else:
+                raise TypeError("Normalization Method Not Known")
+
+            return X_norm, Y_norm
+
+        norm_method = "minmax"
+        X_train_norm, Y_train_norm = normalize(X_train,Y_train,norm_param_train,norm_method)
+        X_valid_norm, Y_valid_norm = normalize(X_valid,Y_valid,norm_param_train,norm_method)
+        X_test_norm, Y_test_norm = normalize(X_test,Y_test,norm_param_train,norm_method)
+
+
+
+
+
+        import torch 
+        from torch.utils.data import Dataset,DataLoader
+
+        class MyDataset(Dataset):
+            def __init__(self, X, Y, his_length, pred_length, pred_mode):
+                self.x = X
+                self.y = Y
+                self.his_length = his_length 
+                self.pred_length = pred_length
+                self.mode = pred_mode
+
+            def __getitem__(self,index):
+
+                x = self.x[index : index + self.his_length]
+                # print(x.shape)
+
+                if self.mode == 'current_step':
+                    y = self.y[index + self.his_length - 1]
+                    y = torch.Tensor([y])
+
+                elif self.mode == 'multi_step':
+                    y = self.y[index + self.his_length : index + self.his_length + self.pred_length]
+                    y = torch.Tensor(y)
+
+                else:
+                    raise TypeError('Prediction Model is not Known')
+                
+                y = torch.ones_like(y)
+
+
+                return torch.Tensor(x)#, y
+            
+            def __len__(self):
+                if self.mode == 'current_step':
+                    # print(len(self.x) - self.his_length + 1)
+                    return len(self.x) - self.his_length + 1
+
+                elif self.mode == 'multi_step':
+                    return len(self.x) - self.his_length - self.pred_length + 1
+                
+                else: 
+                    raise TypeError('Prediction Model is not Known')
+
+
+        pred_mode = 'current_step' # current_step/multi_step
+        his_length = 85 # L
+        pred_length = 1 
+
+        train_dataset = MyDataset(X_train_norm, Y_train_norm, his_length, pred_length, pred_mode)
+        valid_dataset = MyDataset(X_valid_norm, Y_valid_norm, his_length, pred_length, pred_mode)
+        test_dataset = MyDataset(X_test_norm, Y_test_norm, his_length, pred_length, pred_mode)
+
+        batch_size = 128
+
+        train_dataloader = DataLoader(train_dataset, batch_size=batch_size, shuffle=True)
+        valid_dataloader = DataLoader(valid_dataset, batch_size=1, shuffle=False)
+        test_dataloader = DataLoader(test_dataset, batch_size=1, shuffle=False)
+
+        
+        ret = []
+        for item in train_dataloader:
+            for i in item:
+                ret.append(i)
+
+
+        self.train_data = np.array(ret)
+        print(self.train_data.shape)
+
+        ret = []
+        for item in test_dataloader:
+            for i in item:
+                ret.append(i)
+
+
+        self.test_data = np.array(ret)
+        print(self.test_data.shape)
+
+
         self.all_data = np.concatenate([self.train_data, self.test_data], 0)
-        super().__init__(self.train_data, batch_size, nepoch, tensor)
+        super().__init__(self.train_data, 128, nepoch, tensor)
 
-    def normalize(self, data):
-        data = np.concatenate(data, 0)
-        m, s = data.mean((0, 1)), data.std((0, 1))
-        data = (data - m) / (3 * s)
-        data = np.tanh(data)
-        return data
+
 
 
 def plot_batch(batch_series, iters, saved_file, axis=None):
