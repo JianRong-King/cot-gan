@@ -115,7 +115,7 @@ def train(args):
 
     lsinke = int(np.round(np.log10(sinkhorn_eps)))
     lreg = int(np.round(np.log10(reg_penalty)))
-    saved_file = f"{dname[:3]}_{test[0]}_e{lsinke:d}r{lreg:d}s{seed:d}" + \
+    saved_file = f"softsensor_{test[0]}_e{lsinke:d}r{lreg:d}s{seed:d}" + \
         "{}_{}{}-{}:{}:{}.{}".format(dataset, datetime.now().strftime("%h"),
                                      datetime.now().strftime("%d"),
                                      datetime.now().strftime("%H"),
@@ -267,17 +267,31 @@ def train(args):
                     with train_writer.as_default():
                         tf.summary.image("Training data", img, step=it_counts)
 
-                    # generator.build(input_shape=(None, 85, 23))
-                    # discriminator_h.build(input_shape=(None, 85, 23))
-                    # discriminator_m.build(input_shape=(None, 85, 23))
 
-                    # save model to file
-                    generator.save_weights("./trained/{}/{}/".format(test,
-                                                                     model_fn))
-                    discriminator_h.save_weights("./trained/{}/{}_h/".format(test,
-                                                                             model_fn))
-                    discriminator_m.save_weights("./trained/{}/{}_m/".format(test,
-                                                                             model_fn))
+
+
+                    # Ensure the main weights directory exists
+                    weights_dir = "./trained/{}/{}/".format(test, model_fn)
+                    os.makedirs(weights_dir, exist_ok=True)
+
+                    # Ensure the subdirectories for discriminator weights exist
+                    os.makedirs(os.path.join(weights_dir, "_h"), exist_ok=True)
+                    os.makedirs(os.path.join(weights_dir, "_m"), exist_ok=True)
+
+                    # Build the models to ensure they have the correct input shapes
+                    generator.build(input_shape=(None, 85, 23))
+                    discriminator_h.build(input_shape=(None, 85, 23))
+                    discriminator_m.build(input_shape=(None, 85, 23))
+
+                    # Save the weights for the generator
+                    generator.save_weights(os.path.join(weights_dir, "weights.weights.h5"))
+
+                    # Save the weights for discriminator_h
+                    discriminator_h.save_weights(os.path.join(weights_dir, "_h", "weights.weights.h5"))
+
+                    # Save the weights for discriminator_m
+                    discriminator_m.save_weights(os.path.join(weights_dir, "_m", "weights.weights.h5"))
+
             continue
 
     print("--- The entire training takes %s minutes ---" % ((time.time() - start_time) / 60.0))
