@@ -13,6 +13,8 @@ import numpy as np
 import tensorflow as tf
 import tensorflow_probability as tfp
 
+tf.config.run_functions_eagerly(True)
+
 from datetime import datetime
 
 os.environ["OMP_NUM_THREADS"] = "4"
@@ -31,8 +33,8 @@ def train(args):
     # hyper-parameter settings
     dname = args.dname
     test = args.test
-    time_steps = args.time_steps
-    batch_size = args.batch_size
+    time_steps = 85
+    batch_size = 128
     bn = bool(args.bn)
     if "SLURM_ARRAY_TASK_ID" in os.environ:
         seed = int(os.environ["SLURM_ARRAY_TASK_ID"])
@@ -40,9 +42,9 @@ def train(args):
         seed = args.seed
 
     n_iters = 100000
-    Dx = 10
+    Dx = 23
     g_output_activation = 'linear'
-    time_steps = 100
+
 
     if dname == 'AROne':
         data_dist = data_utils.AROne(
@@ -67,6 +69,7 @@ def train(args):
     # Add gradient clipping before updates
     gen_optimiser = tf.keras.optimizers.Adam(gen_lr)
     dischm_optimiser = tf.keras.optimizers.Adam(disc_lr)
+    dischh_optimiser = tf.keras.optimizers.Adam(disc_lr)
 
     it_counts = 0
     disc_iters = 1
@@ -189,7 +192,8 @@ def train(args):
         # update discriminator parameters
         disch_grads, discm_grads = disc_tape.gradient(
             disc_loss, [discriminator_h.trainable_variables, discriminator_m.trainable_variables])
-        dischm_optimiser.apply_gradients(zip(disch_grads, discriminator_h.trainable_variables))
+        dischh_optimiser.apply_gradients(zip(disch_grads, discriminator_h.trainable_variables))
+        # dischh_optimiser.apply_gradients(zip(disch_grads, discriminator_m.trainable_variables))
         dischm_optimiser.apply_gradients(zip(discm_grads, discriminator_m.trainable_variables))
 
     @tf.function
@@ -235,6 +239,7 @@ def train(args):
 
             disc_training_step(real_data, real_data_p)
             loss = gen_training_step(real_data, real_data_p)
+
             it.set_postfix(loss=float(loss))
 
             with train_writer.as_default():
@@ -261,6 +266,11 @@ def train(args):
                     img = tf.transpose(tf.concat(list(samples[:5]), axis=1))[None, :, :, None]
                     with train_writer.as_default():
                         tf.summary.image("Training data", img, step=it_counts)
+
+                    # generator.build(input_shape=(None, 85, 23))
+                    # discriminator_h.build(input_shape=(None, 85, 23))
+                    # discriminator_m.build(input_shape=(None, 85, 23))
+
                     # save model to file
                     generator.save_weights("./trained/{}/{}/".format(test,
                                                                      model_fn))
